@@ -1,0 +1,37 @@
+name: CI
+on: [push, pull_request]
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - run: pip install -e ".[dev]"
+      - run: pytest -q
+      - name: Offline eval (fails on forbidden content, unrefused unanswerables, missed redaction, or low recall)
+        run: python -m policy_rag.evals --offline
+
+  airflow:
+    runs-on: ubuntu-latest
+    env:
+      AIRFLOW_HOME: ${{ github.workspace }}/.airflow
+      AIRFLOW__CORE__LOAD_EXAMPLES: "False"
+      AIRFLOW__CORE__DAGS_FOLDER: ${{ github.workspace }}/dags
+      KB_ARTIFACTS_DIR: ${{ github.workspace }}/.artifacts
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - run: pip install "apache-airflow==3.4.0" -e ".[dev]"
+      - name: DAG integrity test
+        run: pytest -q tests/test_dag.py
+      - name: Run the DAG end to end
+        run: |
+          airflow db migrate
+          airflow dags test kb_refresh 2026-11-15
+          cat "$KB_ARTIFACTS_DIR/current/manifest.json"
